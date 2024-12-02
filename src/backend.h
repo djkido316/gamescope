@@ -169,6 +169,8 @@ namespace gamescope
     private:
         wlr_buffer *m_pClientBuffer = nullptr;
         std::shared_ptr<CReleaseTimelinePoint> m_pReleasePoint;
+
+        std::optional<uint64_t> m_oulLastReleaseTime;
     };
 
     class IBackend

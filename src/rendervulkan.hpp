@@ -123,6 +123,14 @@ inline GamescopeAppTextureColorspace VkColorSpaceToGamescopeAppTextureColorSpace
 	}
 }
 
+struct BufferTimestamp_t
+{
+	uint64_t ulCPUTime = 0; // cpu commit time
+	uint64_t ulGPUTime = 0; // syncobj done time
+
+	uint64_t ulReleaseTime = 0; // the time we last released this buffer
+};
+
 class CVulkanTexture : public gamescope::RcObject
 {
 public:
@@ -235,6 +243,9 @@ private:
 	uint32_t m_lumaPitch = 0;
 	uint32_t m_chromaOffset = 0;
 	uint32_t m_chromaPitch = 0;
+
+	std::mutex m_mutBufferTimestamp;
+	BufferTimestamp_t m_BufferTimestamp{};
 	
 	// If this texture owns the backend Fb (ie. it's an internal texture)
 	gamescope::OwningRc<gamescope::IBackendFb> m_pBackendFb;

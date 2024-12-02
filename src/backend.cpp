@@ -74,6 +74,9 @@ namespace gamescope
     {
         wlr_buffer *pClientBuffer = m_pClientBuffer;
 
+        // OH NO THIS IS BROKEN.
+        // TODO: FIX ME. SHARED PTR DOESNT WORK.
+        // CANT PULL IT OUT HERE LIKE THIS !!!!!!! :(
         std::shared_ptr<CReleaseTimelinePoint> pReleasePoint = std::move( m_pReleasePoint );
         m_pReleasePoint = nullptr;
 
@@ -83,11 +86,18 @@ namespace gamescope
             if ( pReleasePoint )
                 m_pReleasePoint = std::move( pReleasePoint );
         }
-        else if ( pClientBuffer )
+        else
         {
-            wlserver_lock();
-            wlr_buffer_unlock( pClientBuffer );
-            wlserver_unlock();
+            if ( pClientBuffer )
+            {
+                wlserver_lock();
+                wlr_buffer_unlock( pClientBuffer );
+                wlserver_unlock();
+            }
+
+            // Force the release of this now so we can get the time.
+            pReleasePoint = nullptr;
+            m_oulLastReleaseTime = get_time_in_nanos();
         }
         return uRefCount;
     }

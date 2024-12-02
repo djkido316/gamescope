@@ -31,6 +31,9 @@ namespace gamescope
         const OwningRc<CVulkanTexture> &GetVulkanTexture() const { return m_pVulkanTexture; }
 
         void OnBufferDestroyed( void *pUserData );
+    protected:
+        friend CFPSLimiter;
+        BufferTimestamp_t m_Timestamp;
     private:
         CBufferMemoizer *m_pMemoizer = nullptr;
         wlr_buffer *m_pBuffer = nullptr;
