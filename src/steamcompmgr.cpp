@@ -119,6 +119,11 @@ static const int g_nBaseCursorScale = 36;
 #define GPUVIS_TRACE_IMPLEMENTATION
 #include "gpuvis_trace_utils.h"
 
+#if HAVE_LIBSYSTEMD
+
+#include <systemd/sd-bus.h>
+
+#endif
 
 LogScope xwm_log("xwm");
 LogScope g_WaitableLog("waitable");
@@ -170,6 +175,82 @@ namespace gamescope
 {
 	extern std::shared_ptr<INestedHints::CursorInfo> GetX11HostCursor();
 }
+
+#if HAVE_LIBSYSTEMD
+static sd_bus *g_dbus;
+static std::unordered_map<std::string, uint64_t> g_vramCapacities;
+
+static const char *unit_from_pid(pid_t pid) {
+	if (!pid)
+		return NULL;
+
+	sd_bus_message *reply = NULL;
+	const char *path = NULL;
+
+	if (sd_bus_call_method(g_dbus, "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+								  "org.freedesktop.systemd1.Manager", "GetUnitByPID", NULL, &reply, "u", pid) < 0) {
+		xwm_log.warnf("D-Bus call to get unit corresponding to pid %u failed!\n", pid);
+		goto fail;
+	}
+
+	if (sd_bus_message_read(reply, "o", &path) < 0)
+		xwm_log.warnf("Failed to extract unit from D-Bus reply for PID %u!\n", pid);
+
+	path = strdup(path);
+	fail:
+	sd_bus_message_unref(reply);
+	return path;
+}
+
+static int set_memory_low(const char *unit_path, bool focused) {
+	sd_bus_message *message;
+	sd_bus_message *reply;
+
+#define CHECK_MESSAGE(expr)   \
+   ret = expr;                \
+   if (ret < 0) {             \
+      fprintf(stderr, #expr "failed with ret %d\n", ret);                        \
+      goto fail_message;      \
+}
+
+
+	int ret = sd_bus_message_new_method_call(g_dbus, &message, "org.freedesktop.systemd1", unit_path,
+														  "org.freedesktop.systemd1.Unit", "SetProperties");
+	if (ret < 0)
+		return ret;
+	CHECK_MESSAGE(sd_bus_message_append(message, "b", false));
+	CHECK_MESSAGE(sd_bus_message_open_container(message, SD_BUS_TYPE_ARRAY, "(sv)"));
+	{
+		CHECK_MESSAGE(sd_bus_message_open_container(message, SD_BUS_TYPE_STRUCT, "sv"));
+		{
+			CHECK_MESSAGE(sd_bus_message_append(message, "s", "DevMemoryLow"));
+			CHECK_MESSAGE(sd_bus_message_open_container(message, SD_BUS_TYPE_VARIANT, "a(st)"));
+			{
+				CHECK_MESSAGE(sd_bus_message_open_container(message, SD_BUS_TYPE_ARRAY, "(st)"));
+				for (auto &cap: g_vramCapacities) {
+					CHECK_MESSAGE(
+							  sd_bus_message_append(message, "(st)", cap.first.c_str(), focused ? cap.second : 0u));
+				}
+				CHECK_MESSAGE(sd_bus_message_close_container(message));
+			}
+			CHECK_MESSAGE(sd_bus_message_close_container(message));
+		}
+		CHECK_MESSAGE(sd_bus_message_close_container(message));
+	}
+	CHECK_MESSAGE(sd_bus_message_close_container(message));
+
+	CHECK_MESSAGE(sd_bus_call(g_dbus, message, UINT64_MAX, NULL, &reply));
+
+
+	sd_bus_message_unref(reply);
+
+	fail_message:
+	sd_bus_message_unref(message);
+
+	return ret;
+}
+
+#endif
 
 static std::vector< steamcompmgr_win_t* > GetGlobalPossibleFocusWindows();
 static bool
@@ -777,7 +858,7 @@ global_focus_t *GetCurrentFocus()
 		if ( iter != g_VirtualConnectorFocuses.end() )
 			return &iter->second;
 	}
-	
+
 	if ( g_VirtualConnectorFocuses.size() > 0 )
 		return &g_VirtualConnectorFocuses.begin()->second;
 
@@ -3813,7 +3894,7 @@ determine_and_apply_focus( global_focus_t *pFocus )
 	{
 		pFocus->overlayWindow = nullptr;
 		pFocus->notificationWindow = nullptr;
-	}		
+	}
 
 	// Pick inputFocusWindow
 	if ( gamescope::VirtualConnectorIsSingleOutput() &&
@@ -3937,6 +4018,20 @@ determine_and_apply_focus( global_focus_t *pFocus )
 	{
 		hasRepaint = true;
 	}
+
+#if HAVE_LIBSYSTEMD
+	pid_t newFocusedWindowPID = pFocus->focusWindow ? pFocus->focusWindow->pid : 0;
+	if (g_dbus && focusWindow_pid != newFocusedWindowPID) {
+		const char *unfocusedWindowUnit = unit_from_pid(focusWindow_pid);
+		const char *focusedWindowUnit = unit_from_pid(newFocusedWindowPID);
+		bool sameUnit = unfocusedWindowUnit && focusedWindowUnit && !strcmp(unfocusedWindowUnit, focusedWindowUnit);
+
+		if (unfocusedWindowUnit && !sameUnit)
+			set_memory_low(unfocusedWindowUnit, false);
+		if (focusedWindowUnit && !sameUnit)
+			set_memory_low(focusedWindowUnit, true);
+	}
+#endif
 
 	// Backchannel to Steam
 	unsigned long focusedWindow = 0;
@@ -6587,10 +6682,10 @@ void update_wayland_res(CommitDoneList_t *doneCommits, steamcompmgr_win_t *w, Re
 		global_focus_t *pCurrentFocus = GetCurrentFocus();
 
 		static bool bMangoappSocketDisable = env_to_bool( getenv( "GAMESCOPE_MANGOAPP_SOCKET_DISABLE" ));
-		
+
 		// Whether or not to nudge mango app when this commit is done.
 		const bool mango_nudge = pCurrentFocus && ( ( w == pCurrentFocus->focusWindow && !w->isSteamStreamingClient ) ||
-									( pCurrentFocus->focusWindow && pCurrentFocus->focusWindow->isSteamStreamingClient && w->isSteamStreamingClientVideo ) ) 
+									( pCurrentFocus->focusWindow && pCurrentFocus->focusWindow->isSteamStreamingClient && w->isSteamStreamingClientVideo ) )
 									&& !bMangoappSocketDisable;
 
 		bool bValidPreemptiveScale = reslistentry.pAcquirePoint && pCurrentFocus && w == pCurrentFocus->focusWindow;
@@ -7234,7 +7329,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
 			xwm_log.errorf("Failed to load mouse cursor: %s", g_customCursorPath);
 	}
 	else
-	{	
+	{
 		if ( std::shared_ptr<gamescope::INestedHints::CursorInfo> pHostCursor = gamescope::GetX11HostCursor() )
 		{
 			ctx->cursor->setCursorImage(
@@ -7702,6 +7797,29 @@ steamcompmgr_main(int argc, char **argv)
 	// ie. color.rgb = color.rgba * u_ctm[offsetLayerIdx];
 	s_scRGB709To2020Matrix = GetBackend()->CreateBackendBlob( glm::mat3x4( glm::transpose( k_2020_from_709 ) ) );
 
+#if HAVE_LIBSYSTEMD
+	int res = sd_bus_default(&g_dbus);
+	if (res < 0) {
+		g_dbus = NULL;
+		s_LaunchLogScope.warnf(
+				  "Failed to open systemd message bus, there will be no cgroup protection for focused windows.\n");
+	}
+
+	FILE *sysfs_caps = fopen("/sys/fs/cgroup/dmem.capacity", "r");
+	char *line = NULL;
+	size_t size = 0;
+	while (getline(&line, &size, sysfs_caps) >= 0) {
+		char *capacity = strstr(line, " ");
+		if (capacity)
+			++capacity;
+		else
+			continue;
+		uint64_t vramSize = strtoull(capacity, NULL, 10);
+		std::string idString = std::string(line, (capacity - 1) - line);
+		g_vramCapacities.emplace(idString, vramSize);
+	}
+#endif
+
 	for (;;)
 	{
 		{
@@ -7813,7 +7931,7 @@ steamcompmgr_main(int argc, char **argv)
 								std::back_inserter(diffKeys),
 								[](auto& a, auto& b) { return a < b; });
 
-			for ( gamescope::VirtualConnectorKey_t ulKey : diffKeys )	
+			for ( gamescope::VirtualConnectorKey_t ulKey : diffKeys )
 			{
 				bool bIsSteam = gamescope::VirtualConnectorKeyIsSteam( ulKey );
 
