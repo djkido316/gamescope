@@ -79,7 +79,7 @@ namespace vr
     const EVRButtonId k_EButton_QAM = (EVRButtonId)(51);
 }
 
-uint32_t get_appid_from_pid( pid_t pid );
+uint32_t get_appid_from_pid( pid_t pid, bool *pbAppMode = nullptr );
 
 ///////////////////////////////////////////////
 // Josh:

@@ -114,6 +114,7 @@ struct steamcompmgr_win_t {
 	bool isSteamStreamingClientVideo = false;
 	uint32_t inputFocusMode = 0;
 	uint32_t appID = 0;
+	bool bAppMode = false;
 	bool isOverlay = false;
 	bool isExternalOverlay = false;
 	bool isFullscreen = false;
@@ -221,6 +222,10 @@ struct steamcompmgr_win_t {
 		case gamescope::VirtualConnectorStrategies::SteamControlled:
 			return 0;
 		case gamescope::VirtualConnectorStrategies::PerAppId:
+			if ( bAppMode )
+			{
+				return static_cast<gamescope::VirtualConnectorKey_t>( uint64_t( 1llu << 63 ) | this->seq );
+			}
 			return static_cast<gamescope::VirtualConnectorKey_t>( this->appID );
 		case gamescope::VirtualConnectorStrategies::PerWindow:
 			return static_cast<gamescope::VirtualConnectorKey_t>( this->seq );

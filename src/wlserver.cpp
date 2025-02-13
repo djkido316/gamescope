@@ -1616,7 +1616,7 @@ void xdg_toplevel_new(struct wl_listener *listener, void *data)
 {
 }
 
-uint32_t get_appid_from_pid( pid_t pid );
+uint32_t get_appid_from_pid( pid_t pid, bool *pbAppMode = nullptr );
 
 wlserver_xdg_surface_info* waylandy_type_surface_new(struct wl_client *client, struct wlr_surface *surface)
 {
@@ -1639,7 +1639,7 @@ wlserver_xdg_surface_info* waylandy_type_surface_new(struct wl_client *client, s
 	{
 		pid_t nPid = 0;
 		wl_client_get_credentials( client, &nPid, nullptr, nullptr );
-		window->appID = get_appid_from_pid( nPid );
+		window->appID = get_appid_from_pid( nPid, &window->bAppMode );
 	}
 	window->_window_types.emplace<steamcompmgr_xdg_win_t>();
 

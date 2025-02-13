@@ -4355,12 +4355,18 @@ unmap_win(xwayland_ctx_t *ctx, Window id, bool fade)
 }
 
 uint32_t
-get_appid_from_pid( pid_t pid )
+get_appid_from_pid( pid_t pid, bool *pbAppMode = nullptr );
+
+uint32_t
+get_appid_from_pid( pid_t pid, bool *pbAppMode )
 {
 	uint32_t unFoundAppId = 0;
 
 	char filename[256];
 	pid_t next_pid = pid;
+
+	if ( pbAppMode )
+		*pbAppMode = false;
 
 	while ( 1 )
 	{
@@ -4399,7 +4405,12 @@ get_appid_from_pid( pid_t pid )
 
 		sscanf( lastParens + 1, " %c %d", &state, &parent_pid );
 
-		if ( strcmp( "reaper", procName ) == 0 )
+		if ( strcmp( "enable-appmode", procName ) == 0 )
+		{
+			if ( pbAppMode )
+				*pbAppMode = true;
+		}
+		else if ( strcmp( "reaper", procName ) == 0 )
 		{
 			snprintf( filename, sizeof( filename ), "/proc/%i/cmdline", next_pid );
 			std::ifstream proc_cmdline_file( filename );
@@ -4535,7 +4546,7 @@ add_win(xwayland_ctx_t *ctx, Window id, Window prev, unsigned long sequence)
 	{
 		if ( new_win->pid != -1 )
 		{
-			new_win->appID = get_appid_from_pid( new_win->pid );
+			new_win->appID = get_appid_from_pid( new_win->pid, &new_win->bAppMode );
 		}
 		else
 		{
