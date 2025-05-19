@@ -254,6 +254,8 @@ const std::shared_ptr<wlserver_vk_swapchain_feedback>& wlserver_surface_swapchai
 std::vector<std::shared_ptr<steamcompmgr_win_t>> wlserver_get_xdg_shell_windows();
 bool wlserver_xdg_dirty();
 
+void wlserver_force_repaint();
+
 struct wlserver_output_info {
 	const char *description;
 	int phys_width, phys_height; // millimeters

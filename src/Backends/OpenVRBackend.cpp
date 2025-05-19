@@ -1579,6 +1579,9 @@ namespace gamescope
             MarkSceneAppShown( true );
         }
 
+        // Set the initial overlay visibility
+        MarkOverlayShown( vr::VROverlay()->IsOverlayVisible( GetPrimaryPlane()->GetOverlay() ) );
+
         return true;
     }
 
@@ -1592,6 +1595,9 @@ namespace gamescope
                 nNewOverlayVisibleCount = ++m_pBackend->m_nOverlaysVisible;
             else
                 nNewOverlayVisibleCount = --m_pBackend->m_nOverlaysVisible;
+
+            if ( bVisible )
+                wlserver_force_repaint();
 
             m_pBackend->m_nOverlaysVisible.notify_all();
 

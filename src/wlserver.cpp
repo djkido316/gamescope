@@ -3016,3 +3016,8 @@ void wlserver_destroy_xwayland_server(gamescope_xwayland_server_t *server)
 
 	std::erase_if(wlserver.wlr.xwayland_servers, [=](const auto& other) { return other.get() == server; });
 }
+
+void wlserver_force_repaint()
+{
+	hasRepaint = true;
+}
