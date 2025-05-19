@@ -1579,6 +1579,9 @@ namespace gamescope
             MarkSceneAppShown( true );
         }
 
+        // Set the initial overlay visibility
+        MarkOverlayShown( vr::VROverlay()->IsOverlayVisible( GetPrimaryPlane()->GetOverlay() ) );
+
         return true;
     }
 

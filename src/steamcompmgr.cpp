@@ -2533,7 +2533,7 @@ paint_all( global_focus_t *pFocus, bool async )
 			&frameInfo);
 	}
 
-	if ( !bValidContents || !GetBackend()->IsVisible() )
+	if ( !bValidContents )
 	{
 		return;
 	}
