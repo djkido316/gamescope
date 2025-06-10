@@ -69,8 +69,8 @@ gamescope::ConVar<float> cv_vr_trackpad_click_max_delta( "vr_trackpad_click_max_
 gamescope::ConVar<bool> cv_vr_debug_force_opaque( "vr_debug_force_opaque", false, "Force textures to be treated as opaque." );
 gamescope::ConVar<bool> cv_vr_nudge_to_visible_per_connector( "vr_nudge_to_visible_per_connector", false, "" );
 
-// Just below half of 120Hz, so we always at least poll input once per frame, regardless of cadence/cycles.
-gamescope::ConVar<uint64_t> cv_vr_poll_rate( "vr_poll_rate", 4'000'000ul, "Time between input polls. In nanoseconds." );
+// Maximum interval between polling for VR events (normally paced by frame sync)
+gamescope::ConVar<uint32_t> cv_vr_poll_rate( "vr_poll_rate", 50ul, "Max time between input polls. In milliseconds." );
 
 // Not in public headers yet.
 namespace vr
@@ -1235,7 +1235,7 @@ namespace gamescope
                     }
                 }
 
-                sleep_for_nanos( cv_vr_poll_rate );
+                vr::VROverlay()->WaitFrameSync( cv_vr_poll_rate );
             }
         }
 
