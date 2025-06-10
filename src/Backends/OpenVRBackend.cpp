@@ -228,8 +228,14 @@ namespace gamescope
         bool IsSubview() const { return m_bIsSubview; }
 
         COpenVRBackend *GetBackend() const { return m_pBackend; }
+        COpenVRConnector *GetConnector() const { return m_pConnector; }
 
         void OnPageFlip();
+
+        bool operator==( const vr::VROverlayHandle_t& hOverlay ) const
+        {
+            return this->m_hOverlay == hOverlay;
+        }
 
     private:
         COpenVRConnector *m_pConnector = nullptr;
@@ -310,6 +316,15 @@ namespace gamescope
         }
 
         std::span<COpenVRPlane> GetPlanes() { return std::span<COpenVRPlane>( &m_Planes[0], std::size( m_Planes ) ); }
+
+        COpenVRPlane *GetPlaneByOverlayHandle( vr::VROverlayHandle_t hOverlay )
+        {
+            auto iter = std::find( std::begin( m_Planes ), std::end( m_Planes ), hOverlay );
+            if ( iter == std::end( m_Planes ) )
+                return nullptr;
+            else
+                return &(*iter);
+        }
 
         bool ConsumeNudgeToVisible() { return std::exchange( m_bNudgeToVisible, false ); }
         bool IsRelativeMouse() const { return m_bRelativeMouse; }
@@ -931,31 +946,49 @@ namespace gamescope
             }
         }
 
+        COpenVRPlane *GetPlaneByOverlayHandle( vr::VROverlayHandle_t hOverlay )
+        {
+            COpenVRPlane *pPlane = nullptr;
+            for ( COpenVRConnector *pConnector : m_pActiveConnectors )
+            {
+                pPlane = pConnector->GetPlaneByOverlayHandle( hOverlay );
+                if ( pPlane )
+                    break;
+            }
+            return pPlane;
+        }
+
         void VRInputThread()
         {
             pthread_setname_np( pthread_self(), "gamescope-vrinp" );
 
             m_bInitted.wait( false );
 
-            // Josh: PollNextOverlayEvent sucks.
-            // I want WaitNextOverlayEvent (like SDL_WaitEvent) so this doesn't have to spin and sleep.
             while ( m_bRunning )
             {
                 {
                     std::scoped_lock lock{ m_mutActiveConnectors };
 
-                    for ( COpenVRConnector *pConnector : m_pActiveConnectors )
-                    {
-                        bool bIsSteam = VirtualConnectorKeyIsSteam( pConnector->GetVirtualConnectorKey() );
-
-                        for ( COpenVRPlane &plane : pConnector->GetPlanes() )
-                        {
                             vr::VREvent_t vrEvent;
                             bool bDidScrollThisFrame = false;
                             bool bPendingTouchMove = false;
                             float flTouchMoveX, flTouchMoveY;
-                            while( vr::VROverlay()->PollNextOverlayEvent( plane.GetOverlay(), &vrEvent, sizeof( vrEvent ) ) )
+                            vr::VROverlayHandle_t hOverlay;
+                            while( vr::VRSystem()->PollNextEventWithPoseAndOverlays( vr::TrackingUniverseSeated, &vrEvent, sizeof( vrEvent ), nullptr, &hOverlay ) )
                             {
+                                COpenVRPlane *pPlane = nullptr;
+                                COpenVRConnector *pConnector  = nullptr;
+                                bool bIsSteam = false;
+                                if ( hOverlay != vr::k_ulOverlayHandleInvalid )
+                                {
+                                    pPlane = GetPlaneByOverlayHandle( hOverlay );
+				    if ( pPlane )
+				    {
+					pConnector = pPlane->GetConnector();
+					bIsSteam = VirtualConnectorKeyIsSteam( pConnector->GetVirtualConnectorKey() );
+				    }
+                                }
+
                                 switch( vrEvent.eventType )
                                 {
                                     case vr::VREvent_Quit:
@@ -968,7 +1001,7 @@ namespace gamescope
                                     {
                                         if ( !steamMode || bIsSteam )
                                         {
-                                            if ( !plane.IsSubview() )
+                                            if ( !pPlane || !pPlane->IsSubview() )
                                             {
                                                 raise( SIGTERM );
                                             }
@@ -1032,7 +1065,7 @@ namespace gamescope
 
                                     case vr::VREvent_MouseMove:
                                     {
-                                        if ( pConnector->m_bUsingVRMouse )
+                                        if ( pConnector && pConnector->m_bUsingVRMouse )
                                         {
                                             SetFocus( pConnector );
                                             float flX = vrEvent.data.mouse.x / float( g_nOutputWidth );
@@ -1070,13 +1103,15 @@ namespace gamescope
                                         break;
                                     }
                                     case vr::VREvent_FocusEnter:
+                                    if ( pConnector )
                                     {
                                         pConnector->m_bUsingVRMouse = true;
                                         SetFocus( pConnector );
-                                        break;
                                     }
+                                        break;
                                     case vr::VREvent_MouseButtonUp:
                                     case vr::VREvent_MouseButtonDown:
+                                    if ( pConnector )
                                     {
                                         SetFocus( pConnector );
 
@@ -1142,10 +1177,11 @@ namespace gamescope
                                                 wlserver_unlock();
                                             }
                                         }
-                                        break;
                                     }
+                                        break;
 
                                     case vr::VREvent_ScrollSmooth:
+                                    if ( pConnector )
                                     {
                                         SetFocus( pConnector );
                                         float flX = -vrEvent.data.scroll.xdelta * m_flScrollSpeed;
@@ -1154,10 +1190,11 @@ namespace gamescope
                                         wlserver_mousewheel( flX, flY, ++m_uFakeTimestamp );
                                         wlserver_unlock();
                                         bDidScrollThisFrame = true;
-                                        break;
                                     }
+                                        break;
 
                                     case vr::VREvent_ButtonPress:
+                                    if ( pConnector )
                                     {
                                         SetFocus( pConnector );
                                         vr::EVRButtonId button = (vr::EVRButtonId)vrEvent.data.controller.button;
@@ -1171,21 +1208,22 @@ namespace gamescope
                                             openvr_log.infof("QAM button pressed.");
 
                                         wlserver_open_steam_menu( button == vr::k_EButton_QAM );
-                                        break;
                                     }
+                                        break;
 
                                     case vr::VREvent_OverlayShown:
                                     case vr::VREvent_OverlayHidden:
+                                    if ( pConnector )
                                     {
                                         // Only handle this for the base plane.
                                         // Subviews can be hidden if we hide them ourselves,
                                         // or for other reasons.
-                                        if ( !plane.IsSubview() )
+                                        if ( !pPlane->IsSubview() )
                                         {
                                             pConnector->MarkOverlayShown( vrEvent.eventType == vr::VREvent_OverlayShown );
                                         }
-                                        break;
                                     }
+                                        break;
 
                                     default:
                                         break;
@@ -1201,8 +1239,6 @@ namespace gamescope
                                 wlserver_lock();
                                 wlserver_touchmotion( flTouchMoveX, flTouchMoveY , 0, ++m_uFakeTimestamp, bAlwaysMoveCursor );
                                 wlserver_unlock();
-                            }
-                        }
                     }
 
                     // Process mouse input state.
