@@ -375,7 +375,6 @@ namespace gamescope
 	public:
 		COpenVRBackend()
             : m_LibInputWaiter{ "gamescope-libinput" }
-            , m_Thread{ [this](){ this->VRInputThread(); } }
             , m_FlipHandlerThread{ [this](){ this->FlipHandlerThread(); } }
 		{
 		}
@@ -387,7 +386,6 @@ namespace gamescope
             m_bInitted = true;
             m_bInitted.notify_all();
 
-            m_Thread.join();
             m_FlipHandlerThread.join();
 		}
 
@@ -423,6 +421,8 @@ namespace gamescope
                         }
                     }
                 }
+
+                ProcessVRInput();
             }
         }
 
@@ -958,15 +958,8 @@ namespace gamescope
             return pPlane;
         }
 
-        void VRInputThread()
+        void ProcessVRInput()
         {
-            pthread_setname_np( pthread_self(), "gamescope-vrinp" );
-
-            m_bInitted.wait( false );
-
-            while ( m_bRunning )
-            {
-                {
                     std::scoped_lock lock{m_mutActiveConnectors};
 
                     vr::VREvent_t vrEvent;
@@ -1269,10 +1262,6 @@ namespace gamescope
                             pConnector->m_bCurrentlyOverridingPosition = false;
                         }
                     }
-                }
-
-                vr::VROverlay()->WaitFrameSync(cv_vr_poll_rate);
-            }
         }
 
         std::string m_szOverlayKey;
@@ -1326,7 +1315,6 @@ namespace gamescope
         CAsyncWaiter<CRawPointer<IWaitable>, 16> m_LibInputWaiter;
 
         // Threads need to go last, as they rely on the other things in the class being constructed before their code is run.
-        std::thread m_Thread;
         std::thread m_FlipHandlerThread;
 	};
 
