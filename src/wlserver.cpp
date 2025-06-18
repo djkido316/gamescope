@@ -1126,19 +1126,33 @@ static void gamescope_control_set_look( struct wl_client *client, struct wl_reso
 	{
 		// takes ownership of FD.
 		FILE *pG22 = fdopen( g22_fd, "r" );
-		pG22LUT = LoadCubeLut( pG22, bRaisesBlackLevelFloor );
-		fclose( pG22 );
-		g22_fd = -1;
+		if ( pG22 )
+		{
+			pG22LUT = LoadCubeLut( pG22, bRaisesBlackLevelFloor );
+			fclose( pG22 );
+			g22_fd = -1;
+		}
+		else
+		{
+			wl_log.errorf_errno( "gamescope_control_set_look error opening g22 lut" );
+		}
 	}
 
 	if ( pq_fd >= 0 )
 	{
 		// takes ownership of FD.
-		FILE *pPQ = fdopen( g22_fd, "r" );
-		bool bDummy = false;
-		pPQLUT = LoadCubeLut( pPQ, bDummy );
-		fclose( pPQ );
-		pq_fd = -1;
+		FILE *pPQ = fdopen( pq_fd, "r" );
+		if ( pPQ )
+		{
+			bool bDummy = false;
+			pPQLUT = LoadCubeLut( pPQ, bDummy );
+			fclose( pPQ );
+			pq_fd = -1;
+		}
+		else
+		{
+			wl_log.errorf_errno( "gamescope_control_set_look error opening pq lut" );
+		}
 	}
 
 	if ( !pG22LUT && !pPQLUT )
