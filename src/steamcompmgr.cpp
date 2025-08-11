@@ -254,6 +254,10 @@ static int set_memory_low(const char *unit_path, bool focused) {
 
 #endif
 
+static uint64_t currentVblankIndex;
+
+gamescope::ConVar<bool> cv_bfi_enabled("bfi_enabled", false);
+
 static std::vector< steamcompmgr_win_t* > GetGlobalPossibleFocusWindows();
 static bool
 pick_primary_focus_and_override(
@@ -2410,6 +2414,22 @@ bool ShouldDrawCursor()
 	return !pFocus->GetNestedHints();
 }
 
+
+bool BIsUsingBFI()
+{
+	if ( cv_bfi_enabled && g_nSteamCompMgrTargetFPS )
+	{
+		int nRefreshHz = gamescope::ConvertmHzToHz( g_nNestedRefresh ? g_nNestedRefresh : g_nOutputRefresh );
+		int nTargetFPS = g_nSteamCompMgrTargetFPS;
+
+		int nVblankDivisor = nRefreshHz / nTargetFPS;
+
+		return nVblankDivisor > 1;
+	}
+
+	return false;
+}
+
 gamescope::ConVar<bool> cv_paint_primary_plane{ "paint_primary_plane", true };
 gamescope::ConVar<bool> cv_paint_override_redirect_plane{ "paint_override_redirect_plane", true };
 gamescope::ConVar<bool> cv_paint_steam_overlay_plane{ "paint_steam_overlay_plane", true };
@@ -2757,6 +2777,85 @@ paint_all( global_focus_t *pFocus, bool async )
 			frameInfo.shaperLut[i] = g_ColorMgmtLuts[i].vk_lut1d;
 			frameInfo.lut3D[i] = g_ColorMgmtLuts[i].vk_lut3d;
 		}
+	}
+
+	struct bfi_texture_hash
+	{
+		uint64_t operator()(
+			const std::tuple<uint32_t, uint32_t, VkFormat>& x)
+			const
+		{
+			uint64_t hash = std::get<0>(x);
+			hash |= std::get<1>(x) << 16u;
+			hash |= uint64_t(std::get<2>(x)) << 32u;
+			return hash;
+		}
+	};
+
+	static std::unordered_map<std::tuple<uint32_t, uint32_t, VkFormat>, gamescope::OwningRc<CVulkanTexture>, bfi_texture_hash> s_BFIBlackTextureMap;
+
+	if ( BIsUsingBFI() )
+	{
+		int nRefreshHz = gamescope::ConvertmHzToHz( g_nNestedRefresh ? g_nNestedRefresh : g_nOutputRefresh );
+		int nTargetFPS = g_nSteamCompMgrTargetFPS;
+
+		int nVblankDivisor = nRefreshHz / nTargetFPS;
+
+		bool bDoBFI = ( currentVblankIndex % nVblankDivisor ) != 0;
+
+		xwm_log.infof("Doing BFI: %s (%lu) | %d / %d", bDoBFI ? "true" : "false", currentVblankIndex, nTargetFPS, nRefreshHz );
+
+		if ( bDoBFI )
+		{
+			// For BFI, replace each layer's image with a solid black
+			// frame of the same resolution.
+			// We'll cache this image for each layer while BFI is enabled.
+			//
+			// This is kinda gross, but we need this or DRM/AMDGPU will
+			// end up re-uploading a lot of state if resolution/format changes
+			// to DC such as LUTs and such, and will cause massive stutters if we have BFI.
+
+			for ( int i = 0; i < frameInfo.layerCount; i++ )
+			{
+				FrameInfo_t::Layer_t *pLayer = &frameInfo.layers[i];
+				if ( pLayer->tex != nullptr )
+				{
+					uint32_t width = pLayer->tex->width();
+					uint32_t height = pLayer->tex->height();
+					std::tuple<uint32_t, uint32_t, VkFormat> key = std::make_tuple(width, height, pLayer->tex->format());
+
+					gamescope::OwningRc<CVulkanTexture> pBlackTexture;
+					auto iter = s_BFIBlackTextureMap.find(key);
+					if (iter != s_BFIBlackTextureMap.end())
+						pBlackTexture = iter->second;
+					else
+						pBlackTexture = vulkan_create_flat_texture( width, height, 0, 0, 0, 0 );
+					
+
+					pLayer->tex = std::move(pBlackTexture);
+				}
+			}
+
+			// Garbage collect the map.
+			s_BFIBlackTextureMap.clear();
+
+			for ( int i = 0; i < frameInfo.layerCount; i++ )
+			{
+				FrameInfo_t::Layer_t *pLayer = &frameInfo.layers[i];
+				if ( pLayer->tex != nullptr )
+				{
+					uint32_t width = pLayer->tex->width();
+					uint32_t height = pLayer->tex->height();
+					std::tuple<uint32_t, uint32_t, VkFormat> key = std::make_tuple(width, height, pLayer->tex->format());
+
+					s_BFIBlackTextureMap.emplace(key, gamescope::OwningRc<CVulkanTexture>(pLayer->tex.get()));
+				}
+			}
+		}
+	}
+	else
+	{
+		s_BFIBlackTextureMap.clear();
 	}
 
 	if ( pConnector && pConnector->Present( &frameInfo, async ) != 0 )
@@ -8281,6 +8380,8 @@ steamcompmgr_main(int argc, char **argv)
 
 		steamcompmgr_check_xdg(vblank, vblank_idx);
 
+		currentVblankIndex = vblank_idx;
+
 		if ( s_oLowestFPSLimitScheduleVRR )
 		{
 			g_FPSLimitVRRTimer.ArmTimer( *s_oLowestFPSLimitScheduleVRR );
@@ -8423,7 +8524,7 @@ steamcompmgr_main(int argc, char **argv)
 
 		// If we're in the middle of a fade, then keep us
 		// as needing a repaint.
-		if ( is_fading_out() )
+		if ( is_fading_out() || BIsUsingBFI() )
 			hasRepaint = true;
 
 		bool bPainted = false;
