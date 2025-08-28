@@ -8156,7 +8156,10 @@ steamcompmgr_main(int argc, char **argv)
 			{
 				global_focus_t *pFocus = &iter.second;
 				if ( pFocus->IsDirty() )
+				{
 					determine_and_apply_focus( pFocus );
+					hasRepaint = true;
+				}
 			}
 		}
 
@@ -8403,7 +8406,10 @@ steamcompmgr_main(int argc, char **argv)
 		{
 			global_focus_t *pFocus = &iter.second;
 			if ( pFocus->IsDirty() )
+			{
 				determine_and_apply_focus( pFocus );
+				hasRepaint = true;
+			}
 		}
 
 		// XXX(misyl): This is bad! We shouldnt change the upscaler like this at all!!!
