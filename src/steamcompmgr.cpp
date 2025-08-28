@@ -5451,6 +5451,9 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
 				if ( gameFocused && ( w == ctx->focus.overlayWindow || w == ctx->focus.notificationWindow ) )
 				{
 					hasRepaintNonBasePlane = true;
+					if (newOpacity == 0) {
+						hasRepaint = true;
+					}
 				}
 				if ( w == ctx->focus.externalOverlayWindow )
 				{
