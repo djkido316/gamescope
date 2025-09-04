@@ -7666,7 +7666,9 @@ void steamcompmgr_check_xdg(bool vblank, uint64_t vblank_idx)
 			steamcompmgr_flush_frame_done(xdg_win.get());
 		}
 
+		wlserver_lock();
 		handle_presented_xdg();
+		wlserver_unlock();
 	}
 
 	check_new_xdg_res();
