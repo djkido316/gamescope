@@ -13,9 +13,10 @@ jobs:
           pacman-key --init
           pacman -Syu --noconfirm
           pacman -S --noconfirm git meson gcc ninja glslang libcap \
-            sdl2 vulkan-headers libx11 libxmu libxcomposite \
-            libxrender libxres libxtst libxkbcommon libdrm libinput \
-            wayland-protocols benchmark xorg-xwayland pipewire cmake
+          sdl2 vulkan-headers vulkan-icd-loader hwdata \
+          libx11 libxmu libxcomposite libxrender libxres \
+          libxtst libxkbcommon libdrm libinput wayland-protocols \
+          benchmark xorg-xwayland pipewire cmake
 
       - name: Checkout Gamescope 3.12.0
         uses: actions/checkout@v4
