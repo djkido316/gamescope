@@ -1,10 +1,8 @@
-name: CI
+name: Build Gamescope 3.12.0
+
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,27 +12,31 @@ jobs:
         run: |
           pacman-key --init
           pacman -Syu --noconfirm
-          pacman -S --noconfirm git meson clang glslang libcap wlroots0.18 \
-            sdl2 vulkan-headers libx11 libxmu libxcomposite libxrender libxres \
-            libxtst libxkbcommon libdrm libinput wayland-protocols benchmark \
-            xorg-xwayland pipewire cmake \
-            libavif libheif aom rav1e libdecor libxdamage \
-            luajit
-      - uses: actions/checkout@v4
+          pacman -S --noconfirm git meson gcc ninja glslang libcap \
+            wlroots sdl2 vulkan-headers libx11 libxmu libxcomposite \
+            libxrender libxres libxtst libxkbcommon libdrm libinput \
+            wayland-protocols benchmark xorg-xwayland pipewire cmake
+
+      - name: Checkout Gamescope 3.12.0
+        uses: actions/checkout@v4
         with:
+          ref: 3.12.0
           submodules: recursive
-      - name: Build with gcc
+
+      - name: Build with GCC
         run: |
           export CC=gcc CXX=g++
-          meson build-gcc/ -Dinput_emulation=disabled --werror --auto-features=enabled
+          meson setup build-gcc/ --werror --auto-features=enabled
           ninja -C build-gcc/
-      - name: Build with gcc (no vr)
+          DESTDIR=$PWD/out ninja -C build-gcc/ install
+
+      - name: Package Artifact
         run: |
-          export CC=gcc CXX=g++
-          meson build-gcc-novr/ -Dinput_emulation=disabled -Denable_openvr_support=false --werror --auto-features=enabled
-          ninja -C build-gcc-novr/
-#      - name: Build with clang
-#        run: |
-#          export CC=clang CXX=clang++
-#          meson build-clang/ -Dinput_emulation=disabled --werror --auto-features=enabled
-#          ninja -C build-clang/
+          cd out
+          tar -czf ../gamescope-3.12.0.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamescope-3.12.0
+          path: gamescope-3.12.0.tar.gz
