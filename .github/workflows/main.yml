@@ -13,7 +13,7 @@ jobs:
           pacman-key --init
           pacman -Syu --noconfirm
           pacman -S --noconfirm git meson gcc ninja glslang libcap \
-            wlroots sdl2 vulkan-headers libx11 libxmu libxcomposite \
+            sdl2 vulkan-headers libx11 libxmu libxcomposite \
             libxrender libxres libxtst libxkbcommon libdrm libinput \
             wayland-protocols benchmark xorg-xwayland pipewire cmake
 
@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: 3.12.0
-          submodules: recursive
+          submodules: recursive   # 👈 pulls in wlroots + submodules
 
       - name: Build with GCC
         run: |
