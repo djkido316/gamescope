@@ -1031,7 +1031,7 @@ std::vector<std::shared_ptr<steamcompmgr_win_t>> g_steamcompmgr_xdg_wins;
 static bool
 window_is_steam( steamcompmgr_win_t *w )
 {
-	return w && ( w->isSteamLegacyBigPicture || w->appID == 769 );
+	return w && ( w->bIsViewport || w->hViewportTarget || w->isSteamLegacyBigPicture || w->appID == 769 );
 }
 
 static bool
@@ -2053,7 +2053,7 @@ gamescope::ConVar<bool> cv_paint_debug_pause_base_plane( "paint_debug_pause_base
 
 static FrameInfo_t::Layer_t *
 paint_window_commit( const gamescope::Rc<commit_t> &lastCommit, steamcompmgr_win_t *w, steamcompmgr_win_t *scaleW, struct FrameInfo_t *frameInfo,
-			  MouseCursor *cursor, PaintWindowFlags flags = 0, float flOpacityScale = 1.0f, steamcompmgr_win_t *fit = nullptr )
+			  MouseCursor *cursor, PaintWindowFlags flags = 0, float flOpacityScale = 1.0f, steamcompmgr_win_t *fit = nullptr, uint32_t unZPosOffset = 0 )
 
 {
 	int32_t sourceWidth, sourceHeight;
@@ -2186,6 +2186,8 @@ paint_window_commit( const gamescope::Rc<commit_t> &lastCommit, steamcompmgr_win
 		layer->zpos = g_zposExternalOverlay;
 	}
 
+	layer->zpos += unZPosOffset;
+
 	layer->hdr_metadata_blob = nullptr;
 	if (lastCommit->feedback)
 	{
@@ -2207,10 +2209,51 @@ paint_window_commit( const gamescope::Rc<commit_t> &lastCommit, steamcompmgr_win
 	return layer;
 }
 
+int32_t get_win_stacking_order( steamcompmgr_win_t *pWindow )
+{
+	// XXX(misyl): TODO: Cache this!
+	int nOrder = 0;
+	gamescope_xwayland_server_t *server = NULL;
+	for (size_t i = 0; (server = wlserver_get_xwayland_server(i)); i++)
+	{
+		for (steamcompmgr_win_t *w = server->ctx->list; w; w = w->xwayland().next)
+		{
+			if ( w == pWindow )
+				return nOrder;
+			
+			nOrder++;
+		}
+	}
+
+	return -1;
+}
+
 static void
 paint_window(steamcompmgr_win_t *w, steamcompmgr_win_t *scaleW, struct FrameInfo_t *frameInfo,
-			  MouseCursor *cursor, PaintWindowFlags flags = 0, float flOpacityScale = 1.0f, steamcompmgr_win_t *fit = nullptr )
+			  MouseCursor *cursor, PaintWindowFlags flags = 0, float flOpacityScale = 1.0f, steamcompmgr_win_t *fit = nullptr, uint32_t unZPosOffset = 0 )
 {
+	if ( w->bIsViewport )
+	{
+		std::sort( w->pViewportLayers.begin(), w->pViewportLayers.end(),
+		[]( steamcompmgr_win_t *pA, steamcompmgr_win_t *pB )
+		{
+			return get_win_stacking_order( pA ) < get_win_stacking_order( pB );
+		} );
+
+		uint32_t unLayerIndex = 0;
+		for ( steamcompmgr_win_t *pLayer : w->pViewportLayers )
+		{
+			unZPosOffset = unZPosOffset + unLayerIndex++;
+
+			paint_window( pLayer, scaleW, frameInfo, cursor, flags, flOpacityScale, fit, unZPosOffset );
+
+			// Remove base plane flag for any other layers
+			flags &= ~PaintWindowFlag::BasePlane;
+		}
+
+		return;
+	}
+	
 	gamescope::Rc<commit_t> lastCommit;
 	if ( w )
 		get_window_last_done_commit( w, lastCommit );
@@ -2237,7 +2280,7 @@ paint_window(steamcompmgr_win_t *w, steamcompmgr_win_t *scaleW, struct FrameInfo
 		}
 	}
 
-	FrameInfo_t::Layer_t *layer = paint_window_commit( lastCommit, w, scaleW, frameInfo, cursor, flags, flOpacityScale, fit );
+	FrameInfo_t::Layer_t *layer = paint_window_commit( lastCommit, w, scaleW, frameInfo, cursor, flags, flOpacityScale, fit, unZPosOffset );
 
 	if ( layer && ( flags & PaintWindowFlag::BasePlane ) )
 	{
@@ -3598,6 +3641,15 @@ found:;
 			continue;
 		}
 
+		// If this is a viewport layer, don't pick it for our focus.
+		//
+		// We want to render the dummy viewport window, not its layers.
+		// Steam will redirect input focus to the right place from the dummy layer.
+		if ( w->hViewportTarget != None )
+		{
+			continue;
+		}
+
 		if ( w->xwayland().a.map_state == IsViewable && w->xwayland().a.c_class == InputOutput &&
 			( win_has_game_id( w ) || window_is_steam( w ) || w->isSteamStreamingClient ) &&
 			 (w->opacity > TRANSLUCENT || w->isSteamStreamingClient ) )
@@ -4915,6 +4967,20 @@ finish_destroy_win(xwayland_ctx_t *ctx, Window id, bool gone)
                 w->commit_queue.clear();
 			}
 
+			if ( w->hViewportTarget )
+			{
+				steamcompmgr_win_t *pViewportTarget = find_win( ctx, w->hViewportTarget, false );
+				if ( pViewportTarget )
+				{
+					std::erase( pViewportTarget->pViewportLayers, w );
+				}
+			}
+
+			for ( steamcompmgr_win_t *pLayer : w->pViewportLayers )
+			{
+				pLayer->hViewportTarget = None;
+			}
+
 			wlserver_lock();
 			wlserver_x11_surface_info_finish( &w->xwayland().surface );
 			wlserver_unlock();
@@ -5510,6 +5576,42 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
 		{
 			w->inputFocusMode = get_prop(ctx, w->xwayland().id, ctx->atoms.steamInputFocusAtom, 0);
 			MakeFocusDirty();
+		}
+	}
+	if ( ev->atom == ctx->atoms.steamGamescopeViewport )
+	{
+		steamcompmgr_win_t * w = find_win(ctx, ev->window);
+		if (w)
+		{
+			w->bIsViewport = get_prop(ctx, w->xwayland().id, ctx->atoms.steamGamescopeViewport, 0);
+			MakeFocusDirty();
+			hasRepaint = true;
+		}
+	}
+	if ( ev->atom == ctx->atoms.steamGamescopeViewportTarget )
+	{
+		steamcompmgr_win_t * w = find_win(ctx, ev->window);
+		if (w)
+		{
+			if ( w->hViewportTarget != None )
+			{
+				steamcompmgr_win_t *pOldViewportTarget = find_win(ctx, ev->window, false);
+				if ( pOldViewportTarget )
+				{
+					std::erase( pOldViewportTarget->pViewportLayers, w );
+				}
+			}
+
+			w->hViewportTarget = get_prop(ctx, w->xwayland().id, ctx->atoms.steamGamescopeViewportTarget, 0);
+
+			steamcompmgr_win_t *pViewportTarget = find_win(ctx, ev->window, false);
+			if ( pViewportTarget )
+			{
+				pViewportTarget->pViewportLayers.push_back( w );
+			}
+
+			MakeFocusDirty();
+			hasRepaint = true;
 		}
 	}
 	if (ev->atom == ctx->atoms.steamTouchClickModeAtom )
@@ -7326,6 +7428,8 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
 	/* get atoms */
 	ctx->atoms.steamAtom = XInternAtom(ctx->dpy, STEAM_PROP, false);
 	ctx->atoms.steamInputFocusAtom = XInternAtom(ctx->dpy, "STEAM_INPUT_FOCUS", false);
+	ctx->atoms.steamGamescopeViewport = XInternAtom(ctx->dpy, "STEAM_GAMESCOPE_VIEWPORT", false);
+	ctx->atoms.steamGamescopeViewportTarget = XInternAtom(ctx->dpy, "STEAM_GAMESCOPE_VIEWPORT_TARGET", false);
 	ctx->atoms.steamTouchClickModeAtom = XInternAtom(ctx->dpy, "STEAM_TOUCH_CLICK_MODE", false);
 	ctx->atoms.gameAtom = XInternAtom(ctx->dpy, GAME_PROP, false);
 	ctx->atoms.overlayAtom = XInternAtom(ctx->dpy, OVERLAY_PROP, false);

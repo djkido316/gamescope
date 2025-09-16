@@ -154,6 +154,10 @@ struct steamcompmgr_win_t {
 	std::vector< gamescope::Rc<commit_t> > commit_queue;
 	std::shared_ptr<std::vector< uint32_t >> icon;
 
+	bool bIsViewport = false;
+	Window hViewportTarget = None;
+	std::vector<steamcompmgr_win_t *> pViewportLayers;
+
 	steamcompmgr_win_type_t		type;
 
 	steamcompmgr_xwayland_win_t& xwayland() { return std::get<steamcompmgr_xwayland_win_t>(_window_types); }

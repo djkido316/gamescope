@@ -127,6 +127,8 @@ struct xwayland_ctx_t final : public gamescope::IWaitable
 		Atom WLSurfaceIDAtom;
 		Atom WMStateAtom;
 		Atom steamInputFocusAtom;
+		Atom steamGamescopeViewport;
+		Atom steamGamescopeViewportTarget;
 		Atom WMChangeStateAtom;
 		Atom steamTouchClickModeAtom;
 		Atom utf8StringAtom;
